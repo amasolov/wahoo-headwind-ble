@@ -10,7 +10,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .device import HeadwindDevice
 
-PLATFORMS: list[Platform] = [Platform.FAN, Platform.SELECT]
+PLATFORMS: list[Platform] = [Platform.FAN, Platform.NUMBER, Platform.SELECT]
 
 type HeadwindConfigEntry = ConfigEntry[HeadwindDevice]
 

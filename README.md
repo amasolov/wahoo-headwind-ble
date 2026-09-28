@@ -71,6 +71,8 @@ services). If it isn't, add the integration by hand and pick it from the list.
 | --- | --- |
 | `fan.headwind_xxxx` | On/off and speed. Setting a speed switches the fan to manual mode; off uses the fan's power-off mode, like the Wahoo app. Presets: `manual`, `heart_rate`, `speed`, `power`, `core_temp`, `run_speed`, `hybrid`. |
 | `select.headwind_xxxx_mode` | Mode: `off` plus the presets above. |
+| `number.headwind_xxxx_manual_speed` | Speed slider, 0–100 %. Shows the current speed in every mode; setting it switches to manual, like the fan's own speed control. |
+| `number.headwind_xxxx_heart_rate_zone_N_ceiling` | Upper heart rate (bpm) of zones 1–4 in heart-rate mode. They must increase from zone 1 to 4. The Wahoo app only shows zones 1 and 4 (its min and max). |
 
 The sensor-driven modes use whatever sensors are paired to the fan in the
 Wahoo app; `hybrid` also needs its sensor mix configured there.

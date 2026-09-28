@@ -28,10 +28,43 @@ UUID. Discovery has to match on the name.
 | `02 NN` | Set speed, `NN` = 0–100 % (manual mode only) | `encode_set_speed` |
 | `03` | Get mode | `encode_get_mode` |
 | `04 MM` | Set mode (table below) | `encode_set_mode` |
+| `05` | Get configuration | `encode_get_configuration` |
+| `06 <config>` | Set configuration (layout below) | `encode_set_configuration`, `_v2` |
+| `07 II` | Get one configuration item (`II` = 05: power zones) | `encode_get_specific_configuration` |
+| `08 05 <8 × u16>` | Set power zone ceilings | `encode_set_pwr_zone_cfg` |
 
-The codec also has opcodes 05–0B for configuration (HR/power zone ceilings,
-fan min/max, core-temp range), paired sensors, hybrid sensor types and an NVM
-reset. This integration doesn't use them.
+Opcodes 09–0B cover paired sensors, hybrid sensor types and an NVM reset.
+This integration uses 01–06.
+
+## Configuration
+
+`05` is answered with `FE 05 <status> <config>`, and `06 <config>` with
+`FE 06 <status> <config>`. The same layout is used both ways; multi-byte
+values are little-endian:
+
+| Bytes | Field | Units | App clamp on write |
+| --- | --- | --- | --- |
+| 1 each | HR zone 1–4 ceilings | bpm | none |
+| 2 | Speed-sensor minimum | mm/s | ≥ 2235 (5 mph) |
+| 2 | Speed-sensor maximum | mm/s | ≤ 11176 (25 mph) |
+| 1 | Use skin temperature (CORE) | bool | — |
+| 2 | CORE temperature minimum | 0.01 °C | ≥ 3690 |
+| 2 | CORE temperature maximum | 0.01 °C | ≤ 3834 |
+| 2 | Run speed minimum | mm/s | ≥ 1072 |
+| 2 | Run speed maximum | mm/s | ≤ 4876 |
+
+The last five fields exist only on firmware where the app reports
+`supports_skin_temp_and_run_speed`; its decoder reads them only when 9 more
+bytes follow the speed range, and writes them with
+`encode_set_configuration_v2` (18 bytes) instead of the 9-byte v1 command.
+There is no command to change one field, so the integration writes back the
+configuration the fan last reported with only the HR ceilings changed. Every
+byte after the ceilings goes back verbatim, whichever layout the fan uses.
+
+The four HR ceilings are the zone boundaries the fan's heart-rate mode uses
+(`CONFIG_HR_CEILING_1`…`4` in the app's native strings). The app's UI only
+sets zone 1 (`sendSetHrCeiling1`) and zone 4 (`sendSetHrCeiling4`); zones 2
+and 3 are stored on the fan and can be set with the same command.
 
 ## Modes
 

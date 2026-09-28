@@ -26,6 +26,8 @@ OPCODE_GET_SPEED = 0x01
 OPCODE_SET_SPEED = 0x02
 OPCODE_GET_MODE = 0x03
 OPCODE_SET_MODE = 0x04
+OPCODE_GET_CONFIG = 0x05
+OPCODE_SET_CONFIG = 0x06
 
 PACKET_EVENT = 0xFD
 PACKET_RESPONSE = 0xFE
@@ -75,12 +77,65 @@ def set_speed_command(percentage: int) -> bytes:
     return bytes((OPCODE_SET_SPEED, max(0, min(100, int(percentage)))))
 
 
+def get_config_command() -> bytes:
+    return bytes((OPCODE_GET_CONFIG,))
+
+
+def set_config_command(config: HeadwindConfig) -> bytes:
+    """Build the command that stores ``config`` on the fan.
+
+    The fan takes the whole configuration at once; there is no command for a
+    single heart-rate ceiling. Callers should start from the config the fan
+    last reported and change only what they mean to.
+    """
+    ceilings = (max(0, min(255, int(bpm))) for bpm in config.hr_zone_ceilings)
+    return bytes((OPCODE_SET_CONFIG, *ceilings)) + config.tail
+
+
+HR_ZONE_COUNT = 4
+
+
+@dataclass(frozen=True, slots=True)
+class HeadwindConfig:
+    """The fan's stored configuration, as returned by get-configuration.
+
+    Wire layout after the ``FE 05 <status>`` header (and after the ``06``
+    opcode when writing it back), from the app's
+    ``crux_codec_btle_headwind_{decode_packet,encode_set_configuration*}``:
+
+    ``H1 H2 H3 H4``   heart-rate zone ceilings, bpm (u8 each)
+    ``Smin Smax``     speed-sensor range, mm/s (u16 LE each)
+    then, on firmware that supports it (``encode_set_configuration_v2``):
+    ``K Cmin Cmax Rmin Rmax``  skin-temp flag (u8), CORE temperature range
+                               (u16, 0.01 degC) and run-speed range (u16, mm/s)
+
+    Only the heart-rate ceilings are interpreted. Everything after them is
+    kept as raw bytes and written back unchanged, so changing a ceiling can
+    never alter settings this integration doesn't manage, whichever of the
+    two layouts the fan uses.
+    """
+
+    hr_zone_ceilings: tuple[int, int, int, int]
+    tail: bytes
+
+    @property
+    def sensor_speed_range_mms(self) -> tuple[int, int] | None:
+        """Speed-sensor min/max, for diagnostics."""
+        if len(self.tail) < 4:
+            return None
+        return (
+            int.from_bytes(self.tail[0:2], "little"),
+            int.from_bytes(self.tail[2:4], "little"),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class HeadwindUpdate:
     """State carried by a notification; fields the packet doesn't carry are None."""
 
     speed: int | None = None
     mode: HeadwindMode | None = None
+    config: HeadwindConfig | None = None
 
 
 def _mode(value: int) -> HeadwindMode | None:
@@ -96,8 +151,11 @@ def parse_notification(data: bytes | bytearray) -> HeadwindUpdate | None:
     ``FD 01 SS MM``      state event: speed %, mode
     ``FE OP ST VV``      response to opcode OP with status ST (01 = OK) and
                          value VV: speed for 01/02, mode for 03/04
+    ``FE 05 ST <config>`` get-configuration response; the app decodes the
+                         set-configuration acknowledgement (``FE 06``) the
+                         same way. See HeadwindConfig for the layout.
 
-    Verified against a Headwind on firmware 2.0.43.
+    Speed and mode verified against a Headwind on firmware 2.0.43.
     """
     data = bytes(data)
     if len(data) >= 4 and data[0] == PACKET_EVENT and data[1] == EVENT_STATE:
@@ -107,4 +165,12 @@ def parse_notification(data: bytes | bytearray) -> HeadwindUpdate | None:
             return HeadwindUpdate(speed=min(100, data[3]))
         if data[1] in (OPCODE_GET_MODE, OPCODE_SET_MODE):
             return HeadwindUpdate(mode=_mode(data[3]))
+        # 4 ceilings + 2 speed u16s is the shortest config the app accepts.
+        if data[1] in (OPCODE_GET_CONFIG, OPCODE_SET_CONFIG) and len(data) >= 11:
+            return HeadwindUpdate(
+                config=HeadwindConfig(
+                    hr_zone_ceilings=(data[3], data[4], data[5], data[6]),
+                    tail=data[7:],
+                )
+            )
     return None

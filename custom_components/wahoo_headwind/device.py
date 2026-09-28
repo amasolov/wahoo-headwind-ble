@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+import dataclasses
 import logging
 
 from bleak.backends.device import BLEDevice
@@ -15,12 +16,16 @@ from bleak_retry_connector import (
 
 from .protocol import (
     CONTROL_CHAR_UUID,
+    HR_ZONE_COUNT,
     OFF_MODES,
+    HeadwindConfig,
     HeadwindMode,
     HeadwindUpdate,
+    get_config_command,
     get_mode_command,
     get_speed_command,
     parse_notification,
+    set_config_command,
     set_mode_command,
     set_speed_command,
 )
@@ -45,6 +50,7 @@ class HeadwindDevice:
         self._closing = False
         self.mode: HeadwindMode | None = None
         self.speed: int = 0
+        self.config: HeadwindConfig | None = None
         self.last_raw: bytes | None = None
 
     @property
@@ -92,8 +98,13 @@ class HeadwindDevice:
             # The control point only supports write-without-response.
             try:
                 await client.start_notify(CONTROL_CHAR_UUID, self._on_notify)
-                # Ask for the current state; answers arrive as notifications.
-                for command in (get_speed_command(), get_mode_command()):
+                # Ask for the current state and stored configuration; answers
+                # arrive as notifications.
+                for command in (
+                    get_speed_command(),
+                    get_mode_command(),
+                    get_config_command(),
+                ):
                     await client.write_gatt_char(
                         CONTROL_CHAR_UUID, command, response=False
                     )
@@ -147,6 +158,8 @@ class HeadwindDevice:
             self.mode = update.mode
         if update.speed is not None:
             self.speed = update.speed
+        if update.config is not None:
+            self.config = update.config
         self._fire_callbacks()
 
     async def _write(self, payload: bytes) -> None:
@@ -169,6 +182,42 @@ class HeadwindDevice:
         self.speed = max(0, min(100, int(percentage)))
         self._fire_callbacks()
 
+    async def set_hr_zone_ceiling(self, zone: int, bpm: int) -> None:
+        """Set the upper heart rate (bpm) of zone 1-4 used in heart-rate mode.
+
+        The ceilings must stay strictly increasing: the fan picks its speed by
+        which zone the current heart rate falls in, so overlapping zones would
+        make that ambiguous. The Wahoo app only exposes zones 1 and 4, but the
+        fan stores and uses all four.
+        """
+        if self.config is None:
+            raise HeadwindConfigUnknownError(
+                "The fan hasn't reported its configuration yet"
+            )
+        if not 1 <= zone <= HR_ZONE_COUNT:
+            raise ValueError(f"Heart rate zone must be 1-{HR_ZONE_COUNT}, got {zone}")
+        ceilings = list(self.config.hr_zone_ceilings)
+        ceilings[zone - 1] = int(bpm)
+        if any(low >= high for low, high in zip(ceilings, ceilings[1:])):
+            raise HeadwindInvalidConfigError(
+                "Heart rate zone ceilings must increase from zone 1 to zone 4, "
+                f"got {ceilings}"
+            )
+        config = dataclasses.replace(self.config, hr_zone_ceilings=tuple(ceilings))
+        await self._write(set_config_command(config))
+        # The fan acknowledges with FE 06 and the stored config, which
+        # overwrites this; set it now so the UI doesn't bounce back meanwhile.
+        self.config = config
+        self._fire_callbacks()
+
     async def turn_off(self) -> None:
         """Power the fan off the way the Wahoo app does (mode POWER_OFF)."""
         await self.set_mode(HeadwindMode.POWER_OFF)
+
+
+class HeadwindConfigUnknownError(Exception):
+    """The fan's configuration hasn't been read yet, so it can't be changed."""
+
+
+class HeadwindInvalidConfigError(ValueError):
+    """A requested configuration change would leave the fan inconsistent."""

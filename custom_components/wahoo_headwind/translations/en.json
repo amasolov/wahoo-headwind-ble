@@ -34,6 +34,14 @@
         }
       }
     },
+    "number": {
+      "manual_speed": {
+        "name": "Manual speed"
+      },
+      "hr_zone_ceiling": {
+        "name": "Heart rate zone {zone} ceiling"
+      }
+    },
     "fan": {
       "headwind": {
         "state_attributes": {
