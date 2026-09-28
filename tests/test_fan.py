@@ -1,6 +1,7 @@
 """Tests for setup, the fan entity and the mode select."""
 
 import asyncio
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -15,7 +16,8 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
 )
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.wahoo_headwind.const import DOMAIN
 
@@ -179,3 +181,48 @@ async def test_reconnects_when_the_fan_advertises(
         await hass.async_block_till_done()
     assert fake_client.call_count == attempts + 1
     assert hass.states.get(FAN).state != STATE_UNAVAILABLE
+
+
+async def test_reconnects_after_a_short_power_cut(
+    hass: HomeAssistant, setup_entry, fake_client
+) -> None:
+    """The fan comes back advertising exactly what HA already has on record.
+
+    HA skips callbacks for such a duplicate, so only the history check can
+    notice it. On a real fan this left it disconnected for minutes after the
+    plug was switched off and on again.
+    """
+    _, client = setup_entry
+    advertise = async_get_advertisement_callback(hass)
+    advertise(make_service_info())  # seen before the power cut
+    await hass.async_block_till_done()
+    attempts = fake_client.call_count
+
+    with patch("custom_components.wahoo_headwind.device.RECONNECT_DELAY", 0):
+        client.drop()
+        await hass.async_block_till_done()
+        advertise(make_service_info())  # same data again, after the cut
+        await hass.async_block_till_done()
+        assert fake_client.call_count == attempts  # HA suppressed the callback
+
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=6))
+        await hass.async_block_till_done()
+    assert fake_client.call_count == attempts + 1
+    assert hass.states.get(FAN).state != STATE_UNAVAILABLE
+
+
+async def test_history_check_ignores_advertisements_from_before_the_drop(
+    hass: HomeAssistant, setup_entry, fake_client
+) -> None:
+    """An old advertisement says nothing about whether the fan still has power."""
+    _, client = setup_entry
+    async_get_advertisement_callback(hass)(make_service_info())
+    await hass.async_block_till_done()
+    attempts = fake_client.call_count
+
+    client.drop()
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=6))
+    await hass.async_block_till_done()
+    assert fake_client.call_count == attempts
+    assert hass.states.get(FAN).state == STATE_UNAVAILABLE

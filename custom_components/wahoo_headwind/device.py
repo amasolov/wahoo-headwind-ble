@@ -8,6 +8,7 @@ import dataclasses
 import logging
 
 from bleak.backends.device import BLEDevice
+from bluetooth_data_tools import monotonic_time_coarse
 from bleak.exc import BleakError
 from bleak_retry_connector import (
     BleakClientWithServiceCache,
@@ -56,6 +57,9 @@ class HeadwindDevice:
         self._callbacks: list[Callable[[], None]] = []
         self._reconnect_task: asyncio.Task[None] | None = None
         self._advertised = asyncio.Event()
+        # Same clock as BluetoothServiceInfoBleak.time, so advertisements can
+        # be compared against it.
+        self.disconnected_at: float = 0.0
         self._closing = False
         self.mode: HeadwindMode | None = None
         self.speed: int = 0
@@ -143,6 +147,7 @@ class HeadwindDevice:
     def _on_disconnect(self, _client: BleakClientWithServiceCache) -> None:
         _LOGGER.debug("%s: disconnected", self.name)
         self._client = None
+        self.disconnected_at = monotonic_time_coarse()
         self._fire_callbacks()
         if not self._closing and self._reconnect_task is None:
             self._reconnect_task = asyncio.get_running_loop().create_task(
