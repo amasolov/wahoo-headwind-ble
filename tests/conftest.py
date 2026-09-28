@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-import time
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 from bleak.backends.device import BLEDevice
@@ -20,7 +19,10 @@ NAME = "HEADWIND 1234"
 
 
 def make_service_info(
-    name: str = NAME, service_uuids: list[str] | None = None, address: str = ADDRESS
+    name: str = NAME,
+    service_uuids: list[str] | None = None,
+    address: str = ADDRESS,
+    seen_at: float | None = None,
 ) -> BluetoothServiceInfoBleak:
     uuids = [SERVICE_UUID] if service_uuids is None else service_uuids
     device = BLEDevice(address, name, None)
@@ -44,10 +46,8 @@ def make_service_info(
         ),
         connectable=True,
         # HA stamps advertisements with the coarse monotonic clock (ms-level
-        # ticks on Linux); the integration compares against the same clock.
-        # time.monotonic() here would let an advertisement from before a
-        # disconnect look newer than it on CI.
-        time=monotonic_time_coarse(),
+        # ticks on Linux), which is what the integration compares against.
+        time=monotonic_time_coarse() if seen_at is None else seen_at,
         tx_power=None,
     )
 

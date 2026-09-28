@@ -183,25 +183,38 @@ async def test_reconnects_when_the_fan_advertises(
     assert hass.states.get(FAN).state != STATE_UNAVAILABLE
 
 
+# Advertisement timestamps are compared with the moment the fan disconnected.
+# Pin that moment so the tests don't race the clock: on Linux HA's coarse
+# clock ticks every few ms, so "just before" and "just after" a disconnect
+# can land in the same tick.
+DROPPED_AT = 1000.0
+
+
 async def test_reconnects_after_a_short_power_cut(
     hass: HomeAssistant, setup_entry, fake_client
 ) -> None:
     """The fan comes back advertising exactly what HA already has on record.
 
     HA skips callbacks for such a duplicate, so only the history check can
-    notice it. On a real fan this left it disconnected for minutes after the
-    plug was switched off and on again.
+    notice it. On a real fan this left it disconnected after the plug was
+    switched off and on again.
     """
     _, client = setup_entry
     advertise = async_get_advertisement_callback(hass)
-    advertise(make_service_info())  # seen before the power cut
+    advertise(make_service_info(seen_at=DROPPED_AT - 60))  # before the cut
     await hass.async_block_till_done()
     attempts = fake_client.call_count
 
-    with patch("custom_components.wahoo_headwind.device.RECONNECT_DELAY", 0):
+    with (
+        patch("custom_components.wahoo_headwind.device.RECONNECT_DELAY", 0),
+        patch(
+            "custom_components.wahoo_headwind.device.monotonic_time_coarse",
+            return_value=DROPPED_AT,
+        ),
+    ):
         client.drop()
         await hass.async_block_till_done()
-        advertise(make_service_info())  # same data again, after the cut
+        advertise(make_service_info(seen_at=DROPPED_AT + 2))  # same data, after
         await hass.async_block_till_done()
         assert fake_client.call_count == attempts  # HA suppressed the callback
 
@@ -216,12 +229,16 @@ async def test_history_check_ignores_advertisements_from_before_the_drop(
 ) -> None:
     """An old advertisement says nothing about whether the fan still has power."""
     _, client = setup_entry
-    async_get_advertisement_callback(hass)(make_service_info())
+    async_get_advertisement_callback(hass)(make_service_info(seen_at=DROPPED_AT - 60))
     await hass.async_block_till_done()
     attempts = fake_client.call_count
 
-    client.drop()
-    await hass.async_block_till_done()
+    with patch(
+        "custom_components.wahoo_headwind.device.monotonic_time_coarse",
+        return_value=DROPPED_AT,
+    ):
+        client.drop()
+        await hass.async_block_till_done()
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=6))
     await hass.async_block_till_done()
     assert fake_client.call_count == attempts
