@@ -22,7 +22,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: HeadwindConfigEntry) -> 
         hass, address.upper(), connectable=True
     )
     if ble_device is None:
-        raise ConfigEntryNotReady(f"Could not find Headwind with address {address}")
+        raise ConfigEntryNotReady(
+            f"No connectable Bluetooth adapter or proxy can see {address}. The "
+            "Headwind needs an active connection: use a local adapter or an "
+            "ESPHome Bluetooth proxy (Shelly proxies are passive only)"
+        )
 
     device = HeadwindDevice(ble_device, entry.title)
 

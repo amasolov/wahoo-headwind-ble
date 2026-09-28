@@ -68,7 +68,9 @@ async def send(address: str, payload: bytes, char: str, listen: float) -> None:
     async with BleakClient(address) as client:
         await client.start_notify(char, lambda _s, d: print("notify:", d.hex(" ")))
         print("write:", payload.hex(" "))
-        await client.write_gatt_char(char, payload, response=True)
+        props = client.services.get_characteristic(char).properties
+        # The Headwind control point only supports write-without-response.
+        await client.write_gatt_char(char, payload, response="write" in props)
         await asyncio.sleep(listen)
 
 

@@ -53,8 +53,8 @@ async def test_setup_not_found(hass: HomeAssistant, mock_bluetooth: None) -> Non
 async def test_queries_state_on_connect(hass: HomeAssistant, setup_entry) -> None:
     _, client = setup_entry
     assert client.writes == [b"\x01", b"\x03"]
-    client.notify(bytes.fromhex("fe 01 3c"))
-    client.notify(bytes.fromhex("fe 03 04"))
+    client.notify(bytes.fromhex("fe 01 01 3c"))
+    client.notify(bytes.fromhex("fe 03 01 04"))
     await hass.async_block_till_done()
     state = hass.states.get(FAN)
     assert state.state == STATE_ON

@@ -5,10 +5,9 @@ smart fan from Home Assistant over Bluetooth LE: on/off, speed 0–100 %, and
 the fan's own modes (manual, heart rate, speed, power, CORE temperature,
 running speed, hybrid).
 
-> **Status: untested on hardware.** The BLE protocol was extracted from the
-> Wahoo Android app (native codec plus mode enum), but it hasn't been run
-> against a real fan yet. See [docs/PROTOCOL.md](docs/PROTOCOL.md) and
-> `tools/headwind_probe.py` for checking it.
+> **Status: working on real hardware.** Tested against a KICKR Headwind on
+> firmware 2.0.43 (speed, manual/sensor modes, power off, live state). The
+> protocol was extracted from the Wahoo app; see [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## How it connects
 
@@ -23,10 +22,30 @@ local adapter **or** any
 with `active: true` – that's the "BLE gateway". An ESP32 next to the fan is
 usually the most reliable option.
 
-**Shelly:** Shelly scripts can only *scan* BLE advertisements; they can't open
-GATT connections or write characteristics, and Shelly's Home Assistant
-Bluetooth proxy mode is passive-only. The Headwind has to be connected to and
-written to, so Shelly devices can't control it.
+### Shelly Bluetooth proxies won't work
+
+Home Assistant uses Shelly devices as **passive** Bluetooth scanners: they
+relay advertisements but can't open connections. The Headwind has to be
+connected to and written to, so a Shelly proxy can see the fan but can't
+control it. Home Assistant's Bluetooth diagnostics show this: with only Shelly
+scanners, the "connectable" device list stays empty. Shelly scripts can't open
+GATT connections either.
+
+Use one of these instead:
+- an ESP32 running ESPHome with `bluetooth_proxy: active: true` near the fan
+  (any cheap ESP32 board works; an existing ESPHome ESP32 near the bike can
+  usually just have this added), or
+- a Bluetooth adapter on the Home Assistant host, if it's in range, or
+- the standalone [`esphome/headwind.yaml`](esphome/headwind.yaml).
+
+```yaml
+# Minimal ESPHome Bluetooth proxy
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+bluetooth_proxy:
+  active: true
+```
 
 The fan normally accepts a single BLE connection: close the Wahoo app (or
 turn off Bluetooth on that phone) while Home Assistant is connected. ANT+
@@ -35,8 +54,9 @@ turn off Bluetooth on that phone) while Home Assistant is connected. ANT+
 ## Install
 
 ### HACS
-Add this repository as a custom repository (type *Integration*), install
-**Wahoo KICKR Headwind**, restart Home Assistant.
+1. HACS → ⋮ → **Custom repositories** → add
+   `https://github.com/amasolov/wahoo-headwind-ble`, type **Integration**.
+2. Search for **Wahoo KICKR Headwind**, download it, then restart Home Assistant.
 
 ### Manual
 Copy `custom_components/wahoo_headwind` into your `config/custom_components/`

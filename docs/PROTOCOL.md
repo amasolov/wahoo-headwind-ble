@@ -4,18 +4,21 @@ Extracted from the Wahoo Android app (`com.wahoofitness.fitness`). The BLE
 codec is in the app's native library `libCruxAndroid.so`
 (`crux_codec_btle_headwind_*`, `crux_sensor_processor_headwind_v2_*`); mode
 names and how the app uses them come from the decompiled Java/Kotlin
-(`WFSensorViewModelDataHeadwind`). Not yet checked against a real fan, but
-the command encoders, the decoder and the mode enum were all read directly
-from the app.
+(`WFSensorViewModelDataHeadwind`). **Verified on a real Headwind** (hardware
+rev 3, firmware 2.0.43); the byte captures below come from that fan.
 
 ## GATT
 
 | What | UUID | App name |
 | --- | --- | --- |
 | Service | `a026ee0c-0a7d-4ab3-97fa-f1500f9feb8b` | `WAHOO_HEADWIND` (0xEE0C) |
-| Control point (write + notify) | `a026e038-0a7d-4ab3-97fa-f1500f9feb8b` | `WAHOO_HEADWIND_CP` (0xE038) |
+| Control point | `a026e038-0a7d-4ab3-97fa-f1500f9feb8b` | `WAHOO_HEADWIND_CP` (0xE038) |
 
-The fan advertises with a local name starting with `HEADWIND`.
+The control point supports **write-without-response**, notify and read. It
+doesn't support write-with-response, so writes must be sent without response.
+
+The fan advertises only its local name (`HEADWIND XXXX`), not the service
+UUID. Discovery has to match on the name.
 
 ## Commands (write to the control point)
 
@@ -67,22 +70,37 @@ Byte 0 is the packet type:
 
 | Bytes | Meaning |
 | --- | --- |
-| `FE 01 SS` | Get-speed response |
-| `FE 02 ST SS` | Set-speed acknowledgement (`ST` = status) |
-| `FE 03 MM` | Get-mode response |
+| `FE 01 ST SS` | Get-speed response (`ST` = status, `01` = OK) |
+| `FE 02 ST SS` | Set-speed acknowledgement |
+| `FE 03 ST MM` | Get-mode response |
 | `FE 04 ST MM` | Set-mode acknowledgement |
 | `FE 05`–`FE 0B …` | Configuration / paired-sensor / hybrid responses |
 
-The integration takes its state from `FD 01` events and the `FE 01` / `FE 03`
-responses. After connecting it sends `01` and `03` so it knows the state
+The fan also repeats `FD 01` every second or so while connected, and sends
+`FD 02` (paired sensors) after mode changes. Reading the characteristic
+returns the last event.
+
+The integration takes its state from `FD 01` events and from `FE` responses
+with status `01`. After connecting it sends `01` and `03` so it knows the state
 straight away.
+
+## Captured session
+
+```
+-> 01          <- fe 01 01 00                 speed 0
+-> 03          <- fe 03 01 02                 mode HEARTRATE
+-> 04 04       <- fe 04 01 04, fd 01 19 04    manual, resumes last manual speed (25 %)
+-> 02 1e       <- fe 02 01 1e, fd 01 1e 04    30 %
+-> 04 01       <- fe 04 01 01, fd 01 00 01    POWER_OFF
+-> 04 02       <- fe 04 01 02, fd 02 01 01 00 02 ff 04 ff 08 00 10, fd 01 00 02
+```
 
 ## Checking against a real fan
 
 ```bash
 python tools/headwind_probe.py scan                 # find the fan
 python tools/headwind_probe.py monitor <address>    # watch notifications
-python tools/headwind_probe.py send <address> 03    # expect FE 03 <mode>
+python tools/headwind_probe.py send <address> 03    # expect FE 03 01 <mode>
 python tools/headwind_probe.py send <address> 04 04 # manual
 python tools/headwind_probe.py send <address> 02 32 # 50 % -> expect FD 01 32 04
 ```

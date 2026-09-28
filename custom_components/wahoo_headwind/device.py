@@ -89,12 +89,13 @@ class HeadwindDevice:
                 disconnected_callback=self._on_disconnect,
                 ble_device_callback=lambda: self._ble_device,
             )
+            # The control point only supports write-without-response.
             try:
                 await client.start_notify(CONTROL_CHAR_UUID, self._on_notify)
                 # Ask for the current state; answers arrive as notifications.
                 for command in (get_speed_command(), get_mode_command()):
                     await client.write_gatt_char(
-                        CONTROL_CHAR_UUID, command, response=True
+                        CONTROL_CHAR_UUID, command, response=False
                     )
             except BleakError:
                 await client.disconnect()
@@ -152,7 +153,7 @@ class HeadwindDevice:
         await self.connect()
         assert self._client is not None
         _LOGGER.debug("%s: write %s", self.name, payload.hex(" "))
-        await self._client.write_gatt_char(CONTROL_CHAR_UUID, payload, response=True)
+        await self._client.write_gatt_char(CONTROL_CHAR_UUID, payload, response=False)
 
     async def set_mode(self, mode: HeadwindMode) -> None:
         await self._write(set_mode_command(mode))

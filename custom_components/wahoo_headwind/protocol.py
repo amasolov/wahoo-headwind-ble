@@ -2,12 +2,14 @@
 
 Derived from the Wahoo Android app: the BLE codec lives in its native
 ``libCruxAndroid.so`` (``crux_codec_btle_headwind_*``) and the mode names in
-the app's Headwind view model. See docs/PROTOCOL.md for details.
+the app's Headwind view model. Checked against a real fan (firmware 2.0.43).
+See docs/PROTOCOL.md for details.
 
-The fan exposes one proprietary service with a single write/notify control
-point characteristic. Commands are ``<opcode> [arg]``; the fan answers on the
-same characteristic with ``FE <opcode> ...`` responses and pushes
-``FD <event> ...`` events when its state changes.
+The fan exposes one proprietary service with a single control point
+characteristic (write-without-response, notify, read). Commands are
+``<opcode> [arg]``; the fan answers on the same characteristic with
+``FE <opcode> <status> <value>`` responses and pushes ``FD <event> ...``
+events when its state changes.
 """
 
 from __future__ import annotations
@@ -29,6 +31,8 @@ PACKET_EVENT = 0xFD
 PACKET_RESPONSE = 0xFE
 
 EVENT_STATE = 0x01
+
+STATUS_OK = 0x01
 
 
 class HeadwindMode(IntEnum):
@@ -89,19 +93,18 @@ def _mode(value: int) -> HeadwindMode | None:
 def parse_notification(data: bytes | bytearray) -> HeadwindUpdate | None:
     """Decode a notification into a state update, or None if it carries no state.
 
-    ``FD 01 SS MM``  state event: speed %, mode
-    ``FE 01 SS``     get-speed response
-    ``FE 03 MM``     get-mode response
+    ``FD 01 SS MM``      state event: speed %, mode
+    ``FE OP ST VV``      response to opcode OP with status ST (01 = OK) and
+                         value VV: speed for 01/02, mode for 03/04
 
-    Set responses (``FE 02 ..`` / ``FE 04 ..``) are acknowledgements; the
-    actual change is reported by the following state event.
+    Verified against a Headwind on firmware 2.0.43.
     """
     data = bytes(data)
     if len(data) >= 4 and data[0] == PACKET_EVENT and data[1] == EVENT_STATE:
         return HeadwindUpdate(speed=min(100, data[2]), mode=_mode(data[3]))
-    if len(data) >= 3 and data[0] == PACKET_RESPONSE:
-        if data[1] == OPCODE_GET_SPEED:
-            return HeadwindUpdate(speed=min(100, data[2]))
-        if data[1] == OPCODE_GET_MODE:
-            return HeadwindUpdate(mode=_mode(data[2]))
+    if len(data) >= 4 and data[0] == PACKET_RESPONSE and data[2] == STATUS_OK:
+        if data[1] in (OPCODE_GET_SPEED, OPCODE_SET_SPEED):
+            return HeadwindUpdate(speed=min(100, data[3]))
+        if data[1] in (OPCODE_GET_MODE, OPCODE_SET_MODE):
+            return HeadwindUpdate(mode=_mode(data[3]))
     return None
