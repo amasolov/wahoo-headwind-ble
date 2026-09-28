@@ -50,9 +50,21 @@ async def test_setup_not_found(hass: HomeAssistant, mock_bluetooth: None) -> Non
     assert entry.state is ConfigEntryState.SETUP_RETRY
 
 
+async def test_queries_state_on_connect(hass: HomeAssistant, setup_entry) -> None:
+    _, client = setup_entry
+    assert client.writes == [b"\x01", b"\x03"]
+    client.notify(bytes.fromhex("fe 01 3c"))
+    client.notify(bytes.fromhex("fe 03 04"))
+    await hass.async_block_till_done()
+    state = hass.states.get(FAN)
+    assert state.state == STATE_ON
+    assert state.attributes["percentage"] == 60
+    assert hass.states.get(MODE).state == "manual"
+
+
 async def test_state_from_notifications(hass: HomeAssistant, setup_entry) -> None:
     _, client = setup_entry
-    client.notify(bytes.fromhex("fd 01 00 04 3c 00"))
+    client.notify(bytes.fromhex("fd 01 3c 04"))
     await hass.async_block_till_done()
     state = hass.states.get(FAN)
     assert state.state == STATE_ON
@@ -60,14 +72,26 @@ async def test_state_from_notifications(hass: HomeAssistant, setup_entry) -> Non
     assert state.attributes["preset_mode"] == "manual"
     assert hass.states.get(MODE).state == "manual"
 
-    client.notify(bytes.fromhex("fd 01 00 03 00 00"))
+    client.notify(bytes.fromhex("fd 01 00 01"))
     await hass.async_block_till_done()
     assert hass.states.get(FAN).state == STATE_OFF
-    assert hass.states.get(MODE).state == "sleep"
+    assert hass.states.get(MODE).state == "off"
+
+    # Standby is shown as off too.
+    client.notify(bytes.fromhex("fd 01 00 05"))
+    await hass.async_block_till_done()
+    assert hass.states.get(MODE).state == "off"
+
+    # Sensor modes count as on even while the fan is at 0 %.
+    client.notify(bytes.fromhex("fd 01 00 02"))
+    await hass.async_block_till_done()
+    assert hass.states.get(FAN).state == STATE_ON
+    assert hass.states.get(FAN).attributes["preset_mode"] == "heart_rate"
 
 
 async def test_set_percentage_switches_to_manual(hass: HomeAssistant, setup_entry) -> None:
     _, client = setup_entry
+    client.writes.clear()
     await hass.services.async_call(
         "fan", "set_percentage", {ATTR_ENTITY_ID: FAN, "percentage": 75}, blocking=True
     )
@@ -76,29 +100,44 @@ async def test_set_percentage_switches_to_manual(hass: HomeAssistant, setup_entr
 
     # Already manual: only the speed is written.
     client.writes.clear()
+    await hass.services.async_call(
+        "fan", "set_percentage", {ATTR_ENTITY_ID: FAN, "percentage": 30}, blocking=True
+    )
+    assert client.writes == [b"\x02\x1e"]
+
+    # Off uses the app's POWER_OFF mode.
+    client.writes.clear()
     await hass.services.async_call("fan", "turn_off", {ATTR_ENTITY_ID: FAN}, blocking=True)
-    assert client.writes == [b"\x02\x00"]
+    assert client.writes == [b"\x04\x01"]
     assert hass.states.get(FAN).state == STATE_OFF
 
-    # Turning back on restores the previous speed.
+    # Turning back on returns to manual at the previous speed.
     client.writes.clear()
     await hass.services.async_call("fan", "turn_on", {ATTR_ENTITY_ID: FAN}, blocking=True)
-    assert client.writes == [b"\x02\x4b"]
+    assert client.writes == [b"\x04\x04", b"\x02\x1e"]
 
 
 async def test_preset_and_select(hass: HomeAssistant, setup_entry) -> None:
     _, client = setup_entry
+    client.writes.clear()
     await hass.services.async_call(
         "fan", "set_preset_mode", {ATTR_ENTITY_ID: FAN, "preset_mode": "heart_rate"}, blocking=True
     )
-    assert client.writes == [b"\x04\x01"]
+    assert client.writes == [b"\x04\x02"]
     assert hass.states.get(FAN).state == STATE_ON
 
     client.writes.clear()
     await hass.services.async_call(
-        "select", "select_option", {ATTR_ENTITY_ID: MODE, "option": "sleep"}, blocking=True
+        "select", "select_option", {ATTR_ENTITY_ID: MODE, "option": "power"}, blocking=True
     )
-    assert client.writes == [b"\x04\x03"]
+    assert client.writes == [b"\x04\x08"]
+    assert hass.states.get(FAN).attributes["preset_mode"] == "power"
+
+    client.writes.clear()
+    await hass.services.async_call(
+        "select", "select_option", {ATTR_ENTITY_ID: MODE, "option": "off"}, blocking=True
+    )
+    assert client.writes == [b"\x04\x01"]
     assert hass.states.get(FAN).state == STATE_OFF
 
 

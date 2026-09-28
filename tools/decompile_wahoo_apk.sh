@@ -40,6 +40,23 @@ grep -rnE -i "headwind.*(mode|speed|opcode|packet)|(HR|HEART_RATE|SPEED|SLEEP|MA
   | grep -i -E "headwind|fan" | head -80 || true
 
 echo
+echo "=== Native codec (the BLE packets are built in libCruxAndroid.so) ==="
+LIBDIR=$(mktemp -d)
+for split in "$(dirname "$APK")"/config.arm*.apk "$APK"; do
+  [ -f "$split" ] && unzip -qo "$split" 'lib/*/libCruxAndroid.so' -d "$LIBDIR" 2>/dev/null || true
+done
+SO=$(find "$LIBDIR" -name libCruxAndroid.so | head -1)
+if [ -n "$SO" ]; then
+  echo "$SO"
+  strings -a "$SO" | grep -E "crux_codec_btle_headwind_|A026EE0C|A026E038" | sort -u
+  echo "Disassemble e.g. encode_set_speed with:"
+  echo "  objdump -T $SO | grep crux_codec_btle_headwind"
+  echo "  objdump -d --triple=thumbv7-linux-androideabi --start-address=0x<addr> --stop-address=0x<addr+size> $SO"
+else
+  echo "libCruxAndroid.so not found (pass the base APK next to its config.<abi>.apk split)"
+fi
+
+echo
 echo "Look at the files above for the class that builds the write packets"
 echo "(typically a 'HeadwindPacket'/'FanPacket' style class with an opcode enum)"
 echo "and the one that parses notifications; compare with docs/PROTOCOL.md."

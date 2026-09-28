@@ -23,10 +23,14 @@
       "mode": {
         "name": "Mode",
         "state": {
+          "off": "Off",
+          "manual": "Manual",
           "heart_rate": "Heart rate",
           "speed": "Speed",
-          "sleep": "Sleep",
-          "manual": "Manual"
+          "power": "Power",
+          "core_temp": "Core temperature",
+          "run_speed": "Running speed",
+          "hybrid": "Hybrid"
         }
       }
     },
@@ -37,7 +41,11 @@
             "state": {
               "manual": "Manual",
               "heart_rate": "Heart rate",
-              "speed": "Speed"
+              "speed": "Speed",
+              "power": "Power",
+              "core_temp": "Core temperature",
+              "run_speed": "Running speed",
+              "hybrid": "Hybrid"
             }
           }
         }

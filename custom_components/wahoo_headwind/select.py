@@ -1,4 +1,4 @@
-"""Mode select for the Wahoo KICKR Headwind (includes sleep)."""
+"""Mode select for the Wahoo KICKR Headwind."""
 
 from __future__ import annotations
 
@@ -10,7 +10,21 @@ from . import HeadwindConfigEntry
 from .entity import HeadwindEntity
 from .protocol import HeadwindMode
 
-OPTIONS = {mode.name.lower(): mode for mode in HeadwindMode}
+OPTION_OFF = "off"
+
+# Selectable modes. "off" writes POWER_OFF, like the Wahoo app's Off button.
+OPTIONS: dict[str, HeadwindMode] = {
+    OPTION_OFF: HeadwindMode.POWER_OFF,
+    "manual": HeadwindMode.MANUAL,
+    "heart_rate": HeadwindMode.HEART_RATE,
+    "speed": HeadwindMode.SPEED,
+    "power": HeadwindMode.POWER,
+    "core_temp": HeadwindMode.CORE_TEMP,
+    "run_speed": HeadwindMode.RUN_SPEED,
+    "hybrid": HeadwindMode.HYBRID,
+}
+MODE_TO_OPTION = {mode: option for option, mode in OPTIONS.items()}
+MODE_TO_OPTION[HeadwindMode.STANDBY] = OPTION_OFF
 
 
 async def async_setup_entry(
@@ -32,8 +46,7 @@ class HeadwindModeSelect(HeadwindEntity, SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        mode = self._device.mode
-        return mode.name.lower() if mode is not None else None
+        return MODE_TO_OPTION.get(self._device.mode)
 
     async def async_select_option(self, option: str) -> None:
         await self._device.set_mode(OPTIONS[option])

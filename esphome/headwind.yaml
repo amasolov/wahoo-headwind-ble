@@ -33,6 +33,13 @@ ble_client:
     on_connect:
       then:
         - logger.log: "Headwind connected"
+        # Ask for the current speed so the sensor has a value right away.
+        - delay: 1s
+        - ble_client.ble_write:
+            id: headwind
+            service_uuid: ${service_uuid}
+            characteristic_uuid: ${char_uuid}
+            value: [0x01]
 
 output:
   - platform: template
@@ -61,21 +68,28 @@ fan:
 select:
   - platform: template
     name: "Headwind mode"
+    id: headwind_mode
     optimistic: true
-    options: ["Heart rate", "Speed", "Sleep", "Manual"]
+    options: ["Off", "Manual", "Heart rate", "Speed", "Power", "Core temp", "Running speed"]
     set_action:
       - ble_client.ble_write:
           id: headwind
           service_uuid: ${service_uuid}
           characteristic_uuid: ${char_uuid}
           value: !lambda |-
-            static const char *opts[] = {"Heart rate", "Speed", "Sleep", "Manual"};
-            for (uint8_t i = 0; i < 4; i++)
-              if (x == opts[i]) return {0x04, (uint8_t)(i + 1)};
+            // Mode values from the Wahoo app: 1 POWER_OFF, 2 HEARTRATE, 3 SPEED,
+            // 4 DIRECT (manual), 6 CORE_TEMP, 7 RUN_SPEED, 8 POWER.
+            if (x == "Off") return {0x04, 0x01};
+            if (x == "Heart rate") return {0x04, 0x02};
+            if (x == "Speed") return {0x04, 0x03};
+            if (x == "Power") return {0x04, 0x08};
+            if (x == "Core temp") return {0x04, 0x06};
+            if (x == "Running speed") return {0x04, 0x07};
             return {0x04, 0x04};
 
 sensor:
-  # Reported fan speed; raw notifications are logged at DEBUG level.
+  # Fan speed from the fan's state events (FD 01 <speed %> <mode>).
+  # Raw notifications are logged at DEBUG level.
   - platform: ble_client
     type: characteristic
     ble_client_id: headwind
@@ -89,5 +103,6 @@ sensor:
       char buf[4];
       for (auto b : x) { snprintf(buf, sizeof(buf), "%02x ", b); raw += buf; }
       ESP_LOGD("headwind", "notify: %s", raw.c_str());
-      if (x.size() >= 5 && x[0] == 0xFD && x[1] == 0x01) return (float) x[4];
+      if (x.size() >= 4 && x[0] == 0xFD && x[1] == 0x01) return (float) x[2];
+      if (x.size() >= 3 && x[0] == 0xFE && x[1] == 0x01) return (float) x[2];
       return NAN;

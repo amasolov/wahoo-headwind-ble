@@ -2,12 +2,13 @@
 
 Control a [Wahoo KICKR Headwind](https://www.wahoofitness.com/devices/indoor-cycling/accessories/kickr-headwind-buy)
 smart fan from Home Assistant over Bluetooth LE: on/off, speed 0–100 %, and
-the fan's own heart-rate / speed / sleep / manual modes.
+the fan's own modes (manual, heart rate, speed, power, CORE temperature,
+running speed, hybrid).
 
-> **Status: untested on hardware.** The BLE protocol is based on community
-> reverse engineering and hasn't been verified against the Wahoo app or a real
-> fan yet. See [docs/PROTOCOL.md](docs/PROTOCOL.md) for what's known and the
-> two tools in `tools/` for checking it.
+> **Status: untested on hardware.** The BLE protocol was extracted from the
+> Wahoo Android app (native codec plus mode enum), but it hasn't been run
+> against a real fan yet. See [docs/PROTOCOL.md](docs/PROTOCOL.md) and
+> `tools/headwind_probe.py` for checking it.
 
 ## How it connects
 
@@ -48,8 +49,11 @@ services). If it isn't, add the integration by hand and pick it from the list.
 
 | Entity | Description |
 | --- | --- |
-| `fan.headwind_xxxx` | On/off and speed. Setting a speed switches the fan to manual mode. Presets: `manual`, `heart_rate`, `speed`. |
-| `select.headwind_xxxx_mode` | Mode: `heart_rate`, `speed`, `sleep`, `manual`. |
+| `fan.headwind_xxxx` | On/off and speed. Setting a speed switches the fan to manual mode; off uses the fan's power-off mode, like the Wahoo app. Presets: `manual`, `heart_rate`, `speed`, `power`, `core_temp`, `run_speed`, `hybrid`. |
+| `select.headwind_xxxx_mode` | Mode: `off` plus the presets above. |
+
+The sensor-driven modes use whatever sensors are paired to the fan in the
+Wahoo app; `hybrid` also needs its sensor mix configured there.
 
 Example: start the fan at 40 % when the trainer power sensor goes above 0.
 

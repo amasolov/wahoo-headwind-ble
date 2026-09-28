@@ -12,14 +12,15 @@ from . import HeadwindConfigEntry
 from .entity import HeadwindEntity
 from .protocol import HeadwindMode
 
-PRESET_MANUAL = "manual"
-PRESET_HEART_RATE = "heart_rate"
-PRESET_SPEED = "speed"
-
+# Presets are the modes in which the fan runs: manual plus the sensor-driven ones.
 PRESET_TO_MODE = {
-    PRESET_MANUAL: HeadwindMode.MANUAL,
-    PRESET_HEART_RATE: HeadwindMode.HEART_RATE,
-    PRESET_SPEED: HeadwindMode.SPEED,
+    "manual": HeadwindMode.MANUAL,
+    "heart_rate": HeadwindMode.HEART_RATE,
+    "speed": HeadwindMode.SPEED,
+    "power": HeadwindMode.POWER,
+    "core_temp": HeadwindMode.CORE_TEMP,
+    "run_speed": HeadwindMode.RUN_SPEED,
+    "hybrid": HeadwindMode.HYBRID,
 }
 MODE_TO_PRESET = {mode: preset for preset, mode in PRESET_TO_MODE.items()}
 

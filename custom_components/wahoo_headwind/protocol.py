@@ -1,12 +1,13 @@
 """Wahoo KICKR Headwind BLE protocol (pure Python, no Home Assistant imports).
 
-The Headwind exposes a Wahoo proprietary GATT service with a single
-write/notify characteristic. Commands are short byte strings; the first byte
-is an opcode.
+Derived from the Wahoo Android app: the BLE codec lives in its native
+``libCruxAndroid.so`` (``crux_codec_btle_headwind_*``) and the mode names in
+the app's Headwind view model. See docs/PROTOCOL.md for details.
 
-Everything here is kept in one module so that it can be verified (and fixed)
-in one place - see docs/PROTOCOL.md for which parts are confirmed and how to
-verify the rest against the Wahoo app or a real fan.
+The fan exposes one proprietary service with a single write/notify control
+point characteristic. Commands are ``<opcode> [arg]``; the fan answers on the
+same characteristic with ``FE <opcode> ...`` responses and pushes
+``FD <event> ...`` events when its state changes.
 """
 
 from __future__ import annotations
@@ -19,20 +20,42 @@ CONTROL_CHAR_UUID = "a026e038-0a7d-4ab3-97fa-f1500f9feb8b"
 
 LOCAL_NAME_PREFIX = "HEADWIND"
 
+OPCODE_GET_SPEED = 0x01
 OPCODE_SET_SPEED = 0x02
+OPCODE_GET_MODE = 0x03
 OPCODE_SET_MODE = 0x04
 
-# Notifications with this header carry the fan state.
-STATE_HEADER = bytes((0xFD, 0x01))
+PACKET_EVENT = 0xFD
+PACKET_RESPONSE = 0xFE
+
+EVENT_STATE = 0x01
 
 
 class HeadwindMode(IntEnum):
-    """Operating modes selectable from the Wahoo app / fan buttons."""
+    """Fan modes, named as in the Wahoo app."""
 
-    HEART_RATE = 0x01
-    SPEED = 0x02
-    SLEEP = 0x03
-    MANUAL = 0x04
+    ERROR = 0
+    POWER_OFF = 1
+    HEART_RATE = 2
+    SPEED = 3
+    MANUAL = 4  # "DIRECT" in the app
+    STANDBY = 5
+    CORE_TEMP = 6
+    RUN_SPEED = 7
+    POWER = 8
+    HYBRID = 9
+
+
+# Modes in which the fan isn't blowing, as grouped by the Wahoo app.
+OFF_MODES = frozenset({HeadwindMode.ERROR, HeadwindMode.POWER_OFF, HeadwindMode.STANDBY})
+
+
+def get_speed_command() -> bytes:
+    return bytes((OPCODE_GET_SPEED,))
+
+
+def get_mode_command() -> bytes:
+    return bytes((OPCODE_GET_MODE,))
 
 
 def set_mode_command(mode: HeadwindMode) -> bytes:
@@ -41,33 +64,44 @@ def set_mode_command(mode: HeadwindMode) -> bytes:
 
 
 def set_speed_command(percentage: int) -> bytes:
-    """Build the command that sets the manual-mode fan speed (0-100 %).
+    """Build the command that sets the fan speed (0-100 %).
 
-    The fan must be in manual mode for this to take effect.
+    Only honoured in manual mode.
     """
     return bytes((OPCODE_SET_SPEED, max(0, min(100, int(percentage)))))
 
 
 @dataclass(frozen=True, slots=True)
-class HeadwindState:
-    """State decoded from a status notification."""
+class HeadwindUpdate:
+    """State carried by a notification; fields the packet doesn't carry are None."""
 
-    mode: HeadwindMode | None
-    speed: int
-    raw: bytes
+    speed: int | None = None
+    mode: HeadwindMode | None = None
 
 
-def parse_notification(data: bytes | bytearray) -> HeadwindState | None:
-    """Decode a status notification, or return None if it is not one.
+def _mode(value: int) -> HeadwindMode | None:
+    try:
+        return HeadwindMode(value)
+    except ValueError:
+        return None
 
-    Layout (``FD 01 ?? MM SS ...``): byte 3 is the mode, byte 4 the current
-    fan speed in percent.
+
+def parse_notification(data: bytes | bytearray) -> HeadwindUpdate | None:
+    """Decode a notification into a state update, or None if it carries no state.
+
+    ``FD 01 SS MM``  state event: speed %, mode
+    ``FE 01 SS``     get-speed response
+    ``FE 03 MM``     get-mode response
+
+    Set responses (``FE 02 ..`` / ``FE 04 ..``) are acknowledgements; the
+    actual change is reported by the following state event.
     """
     data = bytes(data)
-    if len(data) < 5 or not data.startswith(STATE_HEADER):
-        return None
-    try:
-        mode: HeadwindMode | None = HeadwindMode(data[3])
-    except ValueError:
-        mode = None
-    return HeadwindState(mode=mode, speed=min(100, data[4]), raw=data)
+    if len(data) >= 4 and data[0] == PACKET_EVENT and data[1] == EVENT_STATE:
+        return HeadwindUpdate(speed=min(100, data[2]), mode=_mode(data[3]))
+    if len(data) >= 3 and data[0] == PACKET_RESPONSE:
+        if data[1] == OPCODE_GET_SPEED:
+            return HeadwindUpdate(speed=min(100, data[2]))
+        if data[1] == OPCODE_GET_MODE:
+            return HeadwindUpdate(mode=_mode(data[2]))
+    return None

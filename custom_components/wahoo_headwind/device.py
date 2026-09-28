@@ -15,8 +15,11 @@ from bleak_retry_connector import (
 
 from .protocol import (
     CONTROL_CHAR_UUID,
+    OFF_MODES,
     HeadwindMode,
-    HeadwindState,
+    HeadwindUpdate,
+    get_mode_command,
+    get_speed_command,
     parse_notification,
     set_mode_command,
     set_speed_command,
@@ -54,14 +57,10 @@ class HeadwindDevice:
 
     @property
     def is_on(self) -> bool:
-        if self.mode is None:
+        if self.mode is None or self.mode == HeadwindMode.MANUAL:
             return self.speed > 0
-        if self.mode == HeadwindMode.SLEEP:
-            return False
-        if self.mode == HeadwindMode.MANUAL:
-            return self.speed > 0
-        # HR/speed modes are "on" even while the fan is momentarily at 0 %.
-        return True
+        # Sensor-driven modes are "on" even while the fan is momentarily at 0 %.
+        return self.mode not in OFF_MODES
 
     def set_ble_device(self, ble_device: BLEDevice) -> None:
         """Update the BLEDevice (e.g. when a different proxy sees the fan)."""
@@ -92,6 +91,11 @@ class HeadwindDevice:
             )
             try:
                 await client.start_notify(CONTROL_CHAR_UUID, self._on_notify)
+                # Ask for the current state; answers arrive as notifications.
+                for command in (get_speed_command(), get_mode_command()):
+                    await client.write_gatt_char(
+                        CONTROL_CHAR_UUID, command, response=True
+                    )
             except BleakError:
                 await client.disconnect()
                 raise
@@ -132,16 +136,16 @@ class HeadwindDevice:
 
     def _on_notify(self, _sender: object, data: bytearray) -> None:
         self.last_raw = bytes(data)
-        state = parse_notification(data)
-        _LOGGER.debug("%s: notification %s -> %s", self.name, data.hex(" "), state)
-        if state is None:
-            return
-        self._apply_state(state)
+        update = parse_notification(data)
+        _LOGGER.debug("%s: notification %s -> %s", self.name, data.hex(" "), update)
+        if update is not None:
+            self._apply_update(update)
 
-    def _apply_state(self, state: HeadwindState) -> None:
-        if state.mode is not None:
-            self.mode = state.mode
-        self.speed = state.speed
+    def _apply_update(self, update: HeadwindUpdate) -> None:
+        if update.mode is not None:
+            self.mode = update.mode
+        if update.speed is not None:
+            self.speed = update.speed
         self._fire_callbacks()
 
     async def _write(self, payload: bytes) -> None:
@@ -165,4 +169,5 @@ class HeadwindDevice:
         self._fire_callbacks()
 
     async def turn_off(self) -> None:
-        await self.set_speed(0)
+        """Power the fan off the way the Wahoo app does (mode POWER_OFF)."""
+        await self.set_mode(HeadwindMode.POWER_OFF)

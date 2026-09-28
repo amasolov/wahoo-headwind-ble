@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
@@ -50,6 +50,21 @@ def make_service_info(
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     """Enable custom integrations in all tests."""
+
+
+@pytest.fixture(autouse=True, scope="session")
+def mock_bluez_history() -> Generator[None]:
+    """Skip reading BlueZ history over D-Bus.
+
+    The harness pretends to be Linux; without this the bluetooth integration
+    tries to use dbus-fast, which isn't available on macOS.
+    """
+    with patch(
+        "bluetooth_adapters.systems.linux.LinuxAdapters.history",
+        new_callable=PropertyMock,
+        return_value={},
+    ):
+        yield
 
 
 class FakeClient:
