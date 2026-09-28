@@ -1,0 +1,23 @@
+{
+  "domain": "wahoo_headwind",
+  "name": "Wahoo KICKR Headwind",
+  "bluetooth": [
+    {
+      "local_name": "HEADWIND*",
+      "connectable": true
+    },
+    {
+      "service_uuid": "a026ee0c-0a7d-4ab3-97fa-f1500f9feb8b",
+      "connectable": true
+    }
+  ],
+  "codeowners": ["@amasolov"],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "documentation": "https://github.com/amasolov/wahoo-headwind-ble",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/amasolov/wahoo-headwind-ble/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
