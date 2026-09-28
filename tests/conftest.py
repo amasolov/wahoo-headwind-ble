@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
+from bluetooth_data_tools import monotonic_time_coarse
 import pytest
 
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
@@ -42,7 +43,11 @@ def make_service_info(
             platform_data=(),
         ),
         connectable=True,
-        time=time.monotonic(),
+        # HA stamps advertisements with the coarse monotonic clock (ms-level
+        # ticks on Linux); the integration compares against the same clock.
+        # time.monotonic() here would let an advertisement from before a
+        # disconnect look newer than it on CI.
+        time=monotonic_time_coarse(),
         tx_power=None,
     )
 
