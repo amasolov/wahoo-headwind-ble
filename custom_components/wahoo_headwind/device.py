@@ -33,7 +33,15 @@ from .protocol import (
 _LOGGER = logging.getLogger(__name__)
 
 # The fan only reports state while connected, so we keep the connection open
-# and reconnect after this delay if it drops.
+# and reconnect when it drops. Reconnects are driven by the fan's
+# advertisements: it advertises only while powered and not connected to
+# anything, so an advertisement means "connectable now". The fan is often
+# unpowered for days between rides (its smart plug is switched off), and
+# retrying blindly would tie up a Bluetooth proxy's connection slot with a
+# 20 s connect attempt every few seconds for all that time.
+#
+# RECONNECT_DELAY only spaces out retries while the fan *is* advertising but
+# refusing connections (e.g. the Wahoo app holds it).
 RECONNECT_DELAY = 10.0
 
 
@@ -47,6 +55,7 @@ class HeadwindDevice:
         self._connect_lock = asyncio.Lock()
         self._callbacks: list[Callable[[], None]] = []
         self._reconnect_task: asyncio.Task[None] | None = None
+        self._advertised = asyncio.Event()
         self._closing = False
         self.mode: HeadwindMode | None = None
         self.speed: int = 0
@@ -69,8 +78,13 @@ class HeadwindDevice:
         return self.mode not in OFF_MODES
 
     def set_ble_device(self, ble_device: BLEDevice) -> None:
-        """Update the BLEDevice (e.g. when a different proxy sees the fan)."""
+        """Record an advertisement from the fan.
+
+        Keeps the BLEDevice current (a different proxy may have heard it) and
+        wakes a pending reconnect: the fan just showed it is powered and free.
+        """
         self._ble_device = ble_device
+        self._advertised.set()
 
     def register_callback(self, callback: Callable[[], None]) -> Callable[[], None]:
         """Register a state-change callback; returns an unsubscribe function."""
@@ -138,11 +152,15 @@ class HeadwindDevice:
     async def _reconnect(self) -> None:
         try:
             while not self._closing and not self.connected:
-                await asyncio.sleep(RECONNECT_DELAY)
+                # Only an advertisement received after the drop counts; an
+                # older one says nothing about whether the fan is still on.
+                self._advertised.clear()
+                await self._advertised.wait()
                 try:
                     await self.connect()
                 except (BleakError, TimeoutError) as err:
                     _LOGGER.debug("%s: reconnect failed: %s", self.name, err)
+                    await asyncio.sleep(RECONNECT_DELAY)
         finally:
             self._reconnect_task = None
 

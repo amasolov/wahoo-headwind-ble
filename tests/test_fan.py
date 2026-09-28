@@ -1,9 +1,11 @@
 """Tests for setup, the fan entity and the mode select."""
 
+import asyncio
 from unittest.mock import patch
 
 import pytest
 
+from homeassistant.components.bluetooth import async_get_advertisement_callback
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import (
     ATTR_ENTITY_ID,
@@ -149,3 +151,31 @@ async def test_disconnect_marks_unavailable_and_unload(hass: HomeAssistant, setu
         assert hass.states.get(FAN).state == STATE_UNAVAILABLE
         assert await hass.config_entries.async_unload(entry.entry_id)
     assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+
+async def test_reconnects_when_the_fan_advertises(
+    hass: HomeAssistant, setup_entry, fake_client
+) -> None:
+    """A dropped fan is retried on its next advertisement, not on a timer.
+
+    Between rides the fan's plug is off for days; blind retries would hold a
+    Bluetooth proxy slot the whole time.
+    """
+    _, client = setup_entry
+    attempts = fake_client.call_count
+    with patch("custom_components.wahoo_headwind.device.RECONNECT_DELAY", 0):
+        client.drop()
+        await hass.async_block_till_done()
+        assert hass.states.get(FAN).state == STATE_UNAVAILABLE
+
+        # Silence (fan unpowered): nothing is attempted.
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert fake_client.call_count == attempts
+
+        # The fan powers up and advertises: reconnect straight away.
+        async_get_advertisement_callback(hass)(make_service_info())
+        await hass.async_block_till_done()
+    assert fake_client.call_count == attempts + 1
+    assert hass.states.get(FAN).state != STATE_UNAVAILABLE
