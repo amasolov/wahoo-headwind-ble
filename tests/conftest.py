@@ -57,6 +57,18 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     """Enable custom integrations in all tests."""
 
 
+@pytest.fixture(autouse=True)
+def auto_mock_bluetooth(mock_bluetooth: None) -> None:
+    """Keep the bluetooth integration off the host's real Bluetooth stack.
+
+    Without this, habluetooth opens a BlueZ mgmt socket through libc, which
+    pytest-socket cannot see. On a host with no Bluetooth that fails as an
+    OSError habluetooth tolerates; on GitHub runner images since late Oct 2026
+    it succeeds, and the Python socket wrapper then raises SocketBlockedError,
+    which habluetooth does not catch, so bluetooth setup fails.
+    """
+
+
 @pytest.fixture(autouse=True, scope="session")
 def mock_bluez_history() -> Generator[None]:
     """Skip reading BlueZ history over D-Bus.
