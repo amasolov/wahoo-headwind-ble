@@ -1,1 +1,12 @@
-pytest-homeassistant-custom-component
+# Pins the Home Assistant version under test (0.13.375 = HA 2026.10.4).
+# Renovate bumps it, so an HA change that breaks the integration arrives as
+# a red PR rather than as a red scheduled run with nothing to compare against.
+pytest-homeassistant-custom-component==0.13.375
+
+# The bluetooth, bluetooth_adapters and usb components import these, but the
+# harness does not install them.
+aiousbwatcher
+bleak-retry-connector
+habluetooth
+pyserial
+serialx
