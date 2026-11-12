@@ -19,6 +19,8 @@ from .protocol import (
     CONTROL_CHAR_UUID,
     HR_ZONE_COUNT,
     OFF_MODES,
+    OPCODE_SET_MODE,
+    PACKET_RESPONSE,
     HeadwindConfig,
     HeadwindMode,
     HeadwindUpdate,
@@ -45,6 +47,12 @@ _LOGGER = logging.getLogger(__name__)
 # refusing connections (e.g. the Wahoo app holds it).
 RECONNECT_DELAY = 10.0
 
+# Firmware 1.0.3 silently drops a set-speed sent within ~0.1 s of a set-mode:
+# off -> 75 % ends up in manual at the last manual speed instead. Waiting for
+# the fan's set-mode acknowledgement (FE 04) is enough; it arrives in 0.7-2 s
+# over a weak link. If it never comes, send the speed anyway.
+MODE_ACK_TIMEOUT = 3.0
+
 
 class HeadwindDevice:
     """A single Headwind fan, kept connected and exposed as simple state."""
@@ -65,6 +73,7 @@ class HeadwindDevice:
         self.speed: int = 0
         self.config: HeadwindConfig | None = None
         self.last_raw: bytes | None = None
+        self._mode_ack = asyncio.Event()
 
     @property
     def address(self) -> str:
@@ -171,6 +180,8 @@ class HeadwindDevice:
 
     def _on_notify(self, _sender: object, data: bytearray) -> None:
         self.last_raw = bytes(data)
+        if data[:2] == bytes((PACKET_RESPONSE, OPCODE_SET_MODE)):
+            self._mode_ack.set()
         update = parse_notification(data)
         _LOGGER.debug("%s: notification %s -> %s", self.name, data.hex(" "), update)
         if update is not None:
@@ -199,8 +210,15 @@ class HeadwindDevice:
     async def set_speed(self, percentage: int) -> None:
         """Switch to manual mode (if needed) and set the fan speed."""
         if self.mode != HeadwindMode.MANUAL:
+            self._mode_ack.clear()
             await self._write(set_mode_command(HeadwindMode.MANUAL))
             self.mode = HeadwindMode.MANUAL
+            try:
+                await asyncio.wait_for(self._mode_ack.wait(), MODE_ACK_TIMEOUT)
+            except TimeoutError:
+                _LOGGER.debug(
+                    "%s: no set-mode acknowledgement, sending speed anyway", self.name
+                )
         await self._write(set_speed_command(percentage))
         self.speed = max(0, min(100, int(percentage)))
         self._fire_callbacks()

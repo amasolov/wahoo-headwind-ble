@@ -121,6 +121,38 @@ async def test_set_percentage_switches_to_manual(hass: HomeAssistant, setup_entr
     assert client.writes == [b"\x04\x04", b"\x02\x1e"]
 
 
+async def test_speed_waits_for_mode_ack(hass: HomeAssistant, setup_entry) -> None:
+    """Firmware 1.0.3 drops a speed sent straight after a mode change."""
+    _, client = setup_entry
+    client.ack_mode = False
+    client.writes.clear()
+    task = hass.async_create_task(
+        hass.services.async_call(
+            "fan", "set_percentage", {ATTR_ENTITY_ID: FAN, "percentage": 75}, blocking=True
+        )
+    )
+    for _ in range(10):
+        await asyncio.sleep(0)
+    # The speed is held back until the fan acknowledges the mode change.
+    assert client.writes == [b"\x04\x04"]
+
+    client.notify(bytes.fromhex("fe 04 01 04"))
+    await task
+    assert client.writes == [b"\x04\x04", b"\x02\x4b"]
+
+
+async def test_speed_sent_without_mode_ack(hass: HomeAssistant, setup_entry) -> None:
+    """A fan that never acknowledges still gets the speed, after the timeout."""
+    _, client = setup_entry
+    client.ack_mode = False
+    client.writes.clear()
+    with patch("custom_components.wahoo_headwind.device.MODE_ACK_TIMEOUT", 0.01):
+        await hass.services.async_call(
+            "fan", "set_percentage", {ATTR_ENTITY_ID: FAN, "percentage": 75}, blocking=True
+        )
+    assert client.writes == [b"\x04\x04", b"\x02\x4b"]
+
+
 async def test_preset_and_select(hass: HomeAssistant, setup_entry) -> None:
     _, client = setup_entry
     client.writes.clear()
