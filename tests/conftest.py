@@ -91,6 +91,7 @@ class FakeClient:
         self.is_connected = True
         self.writes: list[bytes] = []
         self.notify_callback = None
+        self.ack_mode = True
         self._disconnected_callback = disconnected_callback
         self.write_gatt_char = AsyncMock(side_effect=self._write)
         self.disconnect = AsyncMock(side_effect=self._disconnect)
@@ -100,6 +101,9 @@ class FakeClient:
 
     async def _write(self, uuid, data, response=None) -> None:
         self.writes.append(bytes(data))
+        # Like the real fan, acknowledge a set-mode with FE 04 <status> <mode>.
+        if self.ack_mode and data[0] == 0x04 and self.notify_callback is not None:
+            self.notify(bytes((0xFE, 0x04, 0x01, data[1])))
 
     async def _disconnect(self) -> None:
         self.is_connected = False
